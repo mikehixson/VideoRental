@@ -22,9 +22,9 @@ namespace VideoRental.Web.Controllers
         }
 
         [HttpPost]
-        public void Post(Order order)
+        public long Post(Order order)
         {
-            _orderRepository.InsertAsync(order).Wait();
+            return _orderRepository.InsertAsync(order).Result;
         }
     }
 }

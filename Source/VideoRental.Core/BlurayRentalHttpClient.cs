@@ -98,7 +98,44 @@ namespace VideoRental.Core
             }
         }
 
-        public async Task PlaceOrder(string cartId, Order order)
+        public class AjaxCart
+        {
+            public Product[] Products { get; set; }
+        }
+
+        public class Product
+        {
+            public string ProductCode { get; set; }
+            public string ProductPrice { get; set; }
+        }
+
+        public async Task<AjaxCart> GetCart()
+        {
+            var url = $"/ajaxcart.asp";
+
+            using (var request = new HttpRequestMessage(HttpMethod.Get, url))
+            {
+                request.Headers.Add("Cookie", _cookieTokenProvider.GetToken());
+
+                using (var response = await _httpClient.SendAsync(request))
+                {
+                    return Deserialize<AjaxCart>(await response.Content.ReadAsStreamAsync());
+                }
+            }
+        }
+
+        private T Deserialize<T>(Stream stream)
+        {
+            using (var textReader = new StreamReader(stream))
+            using (var jsonReader = new Newtonsoft.Json.JsonTextReader(textReader))
+            {
+                var serializer = Newtonsoft.Json.JsonSerializer.Create();
+                return serializer.Deserialize<T>(jsonReader);
+            }
+        }
+
+
+        public async Task<long> PlaceOrder(string cartId, Order order)
         {
             var url = $"/one-page-checkout.asp";
 
@@ -107,59 +144,91 @@ namespace VideoRental.Core
                 request.Headers.Add("Cookie", _cookieTokenProvider.GetToken());
                 request.Headers.Add("Cookie", $"CartID5={cartId}");
 
-                request.Content = new FormUrlEncodedContent(new[]
-                {   
-                    // Billing
+                var content = new List<KeyValuePair<string, string>>()
+                {
+                    new KeyValuePair<string, string>( "PCIaaS_CardId", ""),
+                    new KeyValuePair<string, string>( "My_Saved_Billing", "Select"),    // 27155
+                    new KeyValuePair<string, string>( "remove_billingid", ""),
                     new KeyValuePair<string, string>( "BillingFirstName", order.BillingAddress.FirstName),
                     new KeyValuePair<string, string>( "BillingLastName", order.BillingAddress.LastName),
                     new KeyValuePair<string, string>( "BillingCompanyName", ""),
                     new KeyValuePair<string, string>( "BillingAddress1", order.BillingAddress.Street1),
                     new KeyValuePair<string, string>( "BillingAddress2", order.BillingAddress.Street2),
                     new KeyValuePair<string, string>( "BillingCity", order.BillingAddress.City),
-                    new KeyValuePair<string, string>( "BillingState", order.BillingAddress.State),
-                    new KeyValuePair<string, string>( "BillingPostalCode", order.BillingAddress.PostalCode),                    
+                    new KeyValuePair<string, string>( "BillingCityChanged", "Y"),
                     new KeyValuePair<string, string>( "BillingCountry", "United States"),
+                    new KeyValuePair<string, string>( "BillingCountryChanged", "Y"),
+                    new KeyValuePair<string, string>( "BillingState_Required", "Y"), // N for puerto rico
+                    new KeyValuePair<string, string>( "BillingState_dropdown", order.BillingAddress.State),
+                    new KeyValuePair<string, string>( "BillingState", order.BillingAddress.State),
+                    new KeyValuePair<string, string>( "BillingStateChanged", "Y"),
+                    new KeyValuePair<string, string>( "BillingPostalCode", order.BillingAddress.PostalCode),
+                    new KeyValuePair<string, string>( "BillingPostalCodeChanged", "Y"),
                     new KeyValuePair<string, string>( "BillingPhoneNumber", order.BillingAddress.Phone),
-                    
-
-                    new KeyValuePair<string, string>( "My_Saved_Billing: Select", "Select"),    // Drop down. Indicate that we are not using a saved address
-                    new KeyValuePair<string, string>( "BillingCityChanged", "N"),
-                    new KeyValuePair<string, string>( "BillingCountryChanged", "N"),
-                    new KeyValuePair<string, string>( "BillingState_Required", "N"),
-                    new KeyValuePair<string, string>( "BillingState_dropdown", order.BillingAddress.State),                    
-                    new KeyValuePair<string, string>( "BillingStateChanged", "N"),
-
-
-                    // Shipping
+                    new KeyValuePair<string, string>( "My_Saved_Shipping", "Select"),
+                    new KeyValuePair<string, string>( "remove_shipid", ""),
                     new KeyValuePair<string, string>( "ShipFirstName", order.ShippingAddress.FirstName),
+                    new KeyValuePair<string, string>( "ShipTo", "use_different_address"),
                     new KeyValuePair<string, string>( "ShipLastName", order.ShippingAddress.LastName),
                     new KeyValuePair<string, string>( "ShipCompanyName", ""),
                     new KeyValuePair<string, string>( "ShipAddress1", order.ShippingAddress.Street1),
                     new KeyValuePair<string, string>( "ShipAddress2", order.ShippingAddress.Street2),
                     new KeyValuePair<string, string>( "ShipCity", order.ShippingAddress.City),
+                    new KeyValuePair<string, string>( "ShipCityChanged", "Y"),
+                    new KeyValuePair<string, string>( "ShipCountry", "United States"),
+                    new KeyValuePair<string, string>( "ShipState_Required", "Y"),   // N for Puerto Rico
+                    new KeyValuePair<string, string>( "ShipState_dropdown", order.ShippingAddress.State),
                     new KeyValuePair<string, string>( "ShipState", order.ShippingAddress.State),
                     new KeyValuePair<string, string>( "ShipPostalCode", order.ShippingAddress.PostalCode),
-                    new KeyValuePair<string, string>( "ShipCountry", "United States"),
+                    new KeyValuePair<string, string>( "ShipPostalCodeChanged", "Y"),
                     new KeyValuePair<string, string>( "ShipPhoneNumber", order.ShippingAddress.Phone),
-
-                    new KeyValuePair<string, string>( "My_Saved_Shipping: Select", "Select"),    // Drop down. Indicate that we are not using a saved address
-                    new KeyValuePair<string, string>( "ShipCityChanged", "N"),
-                    new KeyValuePair<string, string>( "ShipCountryChanged", "N"),
-                    new KeyValuePair<string, string>( "ShipState_Required", "N"),
-                    new KeyValuePair<string, string>( "ShipState_dropdown", order.ShippingAddress.State),
-                    new KeyValuePair<string, string>( "ShipStateChanged", "N"),
-
-
                     new KeyValuePair<string, string>( "ShipResidential", "Y"),
                     new KeyValuePair<string, string>( "ShippingSpeedChoice", "101"),
+                    new KeyValuePair<string, string>( "hidden_btncalc_shipping", ""),
+                    new KeyValuePair<string, string>( "CCards", ""),
+                    new KeyValuePair<string, string>( "remove_ccardid", ""),
+                    new KeyValuePair<string, string>( "PaymentMethodTypeDisplay", ""),
+                    new KeyValuePair<string, string>( "PaymentMethodType", "NONE"),
+                    new KeyValuePair<string, string>( "BankName", ""),
+                    new KeyValuePair<string, string>( "AccountType", ""),
+                    new KeyValuePair<string, string>( "RoutingNumber", ""),
+                    new KeyValuePair<string, string>( "AccountNumber", ""),
+                    new KeyValuePair<string, string>( "CheckNumber", ""),
+                    new KeyValuePair<string, string>( "Keep_Payment_Method_On_File_eCheck", "Y"),
+                    new KeyValuePair<string, string>( "PONum", ""),
+                    new KeyValuePair<string, string>( "last-form-submit-date", DateTime.UtcNow.ToString(@"ddd MMM dd yyyy HH:mm:ss \G\M\T\+0000 \(\U\T\C\)")), //Wed Oct 18 2017 12:41:34 GMT+0000 (UTC)
+                    new KeyValuePair<string, string>( "Using_Existing_Account", "N"),                    
+                    //new KeyValuePair<string, string>( "Quantity1", "1"),    //foreach item in the order (below)
+                    new KeyValuePair<string, string>( "CouponCode", ""),
+                    new KeyValuePair<string, string>( "Previous_Tax_Percents", "000"),
+                    new KeyValuePair<string, string>( "Previous_Calc_Shipping", "0"),
+                    new KeyValuePair<string, string>( "code1", ""),
+                    new KeyValuePair<string, string>( "code2", ""),
+                    new KeyValuePair<string, string>( "code3", ""),
+                    new KeyValuePair<string, string>( "btnSubmitOrder", "DoThis")
+                };
 
+                for (var i = 0; i < order.Items.Length; i++)
+                    content.Add(new KeyValuePair<string, string>($"Quantity{i + 1}", "1"));    // We only allow 1 of each item
 
-                    new KeyValuePair<string, string>( "btnSubmitOrder", "DoThis")                    
-                });
-            
-                var response = await _httpClient.SendAsync(request);
+                request.Content = new FormUrlEncodedContent(content);
 
-                var s = await response.Content.ReadAsStringAsync();
+                using (var response = await _httpClient.SendAsync(request))
+                {
+                    // look for redirect response with content like: OrderFinished.asp?Order=Finished&amp;OrderID=236337
+                    if (response.StatusCode != HttpStatusCode.Redirect)
+                        throw new Exception($"Expected status code: {HttpStatusCode.Redirect}, but received {response.StatusCode}.");
+
+                    var location = response.Headers.Location.OriginalString;
+
+                    var regex = new Regex(@"OrderFinished\.asp\?Order=Finished&OrderID=(?<OrderId>\d+)");
+                    var match = regex.Match(location);
+
+                    if (!match.Success)
+                        throw new Exception($"Unexpected Location Header: {location}.");
+
+                    return long.Parse(match.Groups["OrderId"].Value);
+                }
             }
         }
 
@@ -180,7 +249,7 @@ namespace VideoRental.Core
             //return await response.Content.ReadAsStreamAsync();  //todo: how does this get disposed?.
         }
 
-        public async Task<Address[]> GetShippingAddressesAsync6()
+        public async Task<Address[]> GetShippingAddressesAsync()
         {
             var url = "/one-page-checkout.asp";
 
@@ -203,122 +272,122 @@ namespace VideoRental.Core
             return new Address[0];
 
         }
-/*
-        public async Task<Address[]> GetShippingAddressesAsync()
-        {
-            var url = "/AccountSettings.asp?modwhat=change_s";
-
-            var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.Add("Cookie", _cookieTokenProvider.GetToken());
-
-            var response = await _httpClient.SendAsync(request);
-
-            response.EnsureSuccessStatusCode();
-
-            var document = new HtmlDocument();
-            document.Load(await response.Content.ReadAsStreamAsync());
-
-            var addressIds = document.DocumentNode.SelectNodes("//input[@type='radio' and @name='ShipCHOSEN']")
-                .Select(n => int.Parse(n.GetAttributeValue("value", default(string))));
-
-
-            return await Task.WhenAll(EnumerateAddressIds());
-
-            IEnumerable<Task<Address>> EnumerateAddressIds()
-            {
-                foreach (var addressId in addressIds)
-                    yield return GetShippingAddressAsync(addressId);
-            }
-        }
-
-
-        private async Task<Address> GetShippingAddressAsync(int id)
-        {
-            var url = $"/AccountSettings.asp?modwhat=change_s&ShipID={id}&Recurring=&DirectLink=&OrderPlaced=&ReturnTo=";
-
-            var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.Add("Cookie", _cookieTokenProvider.GetToken());
-
-
-            var response = await _httpClient.SendAsync(request);
-
-            response.EnsureSuccessStatusCode();
-
-            var document = new HtmlDocument();
-            document.Load(await response.Content.ReadAsStreamAsync());
-
-            var inputs = document.DocumentNode.SelectNodes("//input[@name and @value]");
-
-            var address = new Address();
-            address.Id = id;
-
-            foreach (var input in inputs)        //todo: do this differntly. query for each name
-            {
-                switch (input.GetAttributeValue("name"))
+        /*
+                public async Task<Address[]> GetShippingAddressesAsync()
                 {
-                    case var name when name.Equals("ShipFirstName", StringComparison.OrdinalIgnoreCase):
-                        address.FirstName = input.GetAttributeValue("value");
-                        break;
+                    var url = "/AccountSettings.asp?modwhat=change_s";
 
-                    case var name when name.Equals("ShipLastName", StringComparison.OrdinalIgnoreCase):
-                        address.LastName = input.GetAttributeValue("value");
-                        break;
+                    var request = new HttpRequestMessage(HttpMethod.Get, url);
+                    request.Headers.Add("Cookie", _cookieTokenProvider.GetToken());
 
-                    case var name when name.Equals("ShipCompanyName", StringComparison.OrdinalIgnoreCase):
-                        address.Company = input.GetAttributeValue("value");
-                        break;
+                    var response = await _httpClient.SendAsync(request);
 
-                    case var name when name.Equals("ShipAddress1", StringComparison.OrdinalIgnoreCase):
-                        address.Street1 = input.GetAttributeValue("value");
-                        break;
+                    response.EnsureSuccessStatusCode();
 
-                    case var name when name.Equals("ShipAddress2", StringComparison.OrdinalIgnoreCase):
-                        address.Street2 = input.GetAttributeValue("value");
-                        break;
+                    var document = new HtmlDocument();
+                    document.Load(await response.Content.ReadAsStreamAsync());
 
-                    case var name when name.Equals("ShipCity", StringComparison.OrdinalIgnoreCase):
-                        address.City = input.GetAttributeValue("value");
-                        break;
+                    var addressIds = document.DocumentNode.SelectNodes("//input[@type='radio' and @name='ShipCHOSEN']")
+                        .Select(n => int.Parse(n.GetAttributeValue("value", default(string))));
 
-                    case var name when name.Equals("ShipPostalCode", StringComparison.OrdinalIgnoreCase):
-                        address.PostalCode = input.GetAttributeValue("value");
-                        break;
 
-                    case var name when name.Equals("ShipPhoneNumber", StringComparison.OrdinalIgnoreCase):
-                        address.Phone = input.GetAttributeValue("value");
-                        break;
+                    return await Task.WhenAll(EnumerateAddressIds());
+
+                    IEnumerable<Task<Address>> EnumerateAddressIds()
+                    {
+                        foreach (var addressId in addressIds)
+                            yield return GetShippingAddressAsync(addressId);
+                    }
                 }
-            }
 
-            foreach (var script in document.DocumentNode.SelectNodes("//script[not(@src)]"))
-            {
-                // todo: move this somewhere else
-                var regex = new Regex("(ShipCountry_default_value = \"(?<Country>[^\"]+)\").*?(ShipState_dropdown_default_value = \"(?<State>[^\"]+)\")", RegexOptions.Singleline | RegexOptions.ExplicitCapture | RegexOptions.Compiled);
 
-                var match = regex.Match(script.InnerText);
-
-                if (match.Success)
+                private async Task<Address> GetShippingAddressAsync(int id)
                 {
-                    address.State = match.Groups["State"].Value;
-                    address.Country = match.Groups["Country"].Value;
+                    var url = $"/AccountSettings.asp?modwhat=change_s&ShipID={id}&Recurring=&DirectLink=&OrderPlaced=&ReturnTo=";
 
-                    break;
+                    var request = new HttpRequestMessage(HttpMethod.Get, url);
+                    request.Headers.Add("Cookie", _cookieTokenProvider.GetToken());
+
+
+                    var response = await _httpClient.SendAsync(request);
+
+                    response.EnsureSuccessStatusCode();
+
+                    var document = new HtmlDocument();
+                    document.Load(await response.Content.ReadAsStreamAsync());
+
+                    var inputs = document.DocumentNode.SelectNodes("//input[@name and @value]");
+
+                    var address = new Address();
+                    address.Id = id;
+
+                    foreach (var input in inputs)        //todo: do this differntly. query for each name
+                    {
+                        switch (input.GetAttributeValue("name"))
+                        {
+                            case var name when name.Equals("ShipFirstName", StringComparison.OrdinalIgnoreCase):
+                                address.FirstName = input.GetAttributeValue("value");
+                                break;
+
+                            case var name when name.Equals("ShipLastName", StringComparison.OrdinalIgnoreCase):
+                                address.LastName = input.GetAttributeValue("value");
+                                break;
+
+                            case var name when name.Equals("ShipCompanyName", StringComparison.OrdinalIgnoreCase):
+                                address.Company = input.GetAttributeValue("value");
+                                break;
+
+                            case var name when name.Equals("ShipAddress1", StringComparison.OrdinalIgnoreCase):
+                                address.Street1 = input.GetAttributeValue("value");
+                                break;
+
+                            case var name when name.Equals("ShipAddress2", StringComparison.OrdinalIgnoreCase):
+                                address.Street2 = input.GetAttributeValue("value");
+                                break;
+
+                            case var name when name.Equals("ShipCity", StringComparison.OrdinalIgnoreCase):
+                                address.City = input.GetAttributeValue("value");
+                                break;
+
+                            case var name when name.Equals("ShipPostalCode", StringComparison.OrdinalIgnoreCase):
+                                address.PostalCode = input.GetAttributeValue("value");
+                                break;
+
+                            case var name when name.Equals("ShipPhoneNumber", StringComparison.OrdinalIgnoreCase):
+                                address.Phone = input.GetAttributeValue("value");
+                                break;
+                        }
+                    }
+
+                    foreach (var script in document.DocumentNode.SelectNodes("//script[not(@src)]"))
+                    {
+                        // todo: move this somewhere else
+                        var regex = new Regex("(ShipCountry_default_value = \"(?<Country>[^\"]+)\").*?(ShipState_dropdown_default_value = \"(?<State>[^\"]+)\")", RegexOptions.Singleline | RegexOptions.ExplicitCapture | RegexOptions.Compiled);
+
+                        var match = regex.Match(script.InnerText);
+
+                        if (match.Success)
+                        {
+                            address.State = match.Groups["State"].Value;
+                            address.Country = match.Groups["Country"].Value;
+
+                            break;
+                        }
+                    }
+
+                    return address;
                 }
-            }
 
-            return address;
-        }
+                public async Task DeleteShippingAddressAsync(int id)
+                {
+                    var url = $"/AccountSettings.asp?modwhat=change_s&Delete={id}";
 
-        public async Task DeleteShippingAddressAsync(int id)
-        {
-            var url = $"/AccountSettings.asp?modwhat=change_s&Delete={id}";
+                    var request = new HttpRequestMessage(HttpMethod.Get, url);
+                    request.Headers.Add("Cookie", _cookieTokenProvider.GetToken());
 
-            var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.Add("Cookie", _cookieTokenProvider.GetToken());
-
-            await _httpClient.SendAsync(request);
-        }
-*/
+                    await _httpClient.SendAsync(request);
+                }
+        */
 
         private IEnumerable<Cookie> ParseCookies(IEnumerable<string> cookieHeaders)
         {

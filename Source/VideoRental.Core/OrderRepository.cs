@@ -7,7 +7,7 @@ namespace VideoRental.Core
 {
     public interface IOrderRepository
     {
-        Task InsertAsync(Order order);
+        Task<long> InsertAsync(Order order);
     }
 
     public class OrderRepository : IOrderRepository
@@ -19,32 +19,26 @@ namespace VideoRental.Core
             _httpClient = httpClient;
         }
 
-        public async Task InsertAsync(Order order)
+        public async Task<long> InsertAsync(Order order)
         {
-            //await _httpClient.GetShippingAddressesAsync();
-
             await _httpClient.ClearCart();
 
             string cartId = null;
 
-            foreach(var item in order.Items)
+            foreach (var item in order.Items)
                 cartId = await _httpClient.AddToCart(item.Id);
 
-            //var y = await _httpClient.GetOrderTotals(cartId);
+            var cart = await _httpClient.GetCart();
 
+            foreach (var product in cart.Products)
+            {
+                if (product.ProductPrice != "$0.00") //todo: lets use a decimal
+                    throw new Exception($"Cart contains items not included in subscription.");
+            }
 
-            // ajaxcart.asp has product and subtotal values > 0 when subscription limit exceeeded? how about when its not exceeded? this si the simplest way to see if we will have to pay.
+            //TODO: this is failing on first try after login.
 
-
-            // We could also try https://www.store-3d-blurayrental.com/one-page-checkout.asp?ShippingSpeedChoice=ShippingSpeedChoice
-            // which is called by the checkout page.. posts all 
-
-            // Posting order shoul dnot require a payment method selection if its zero dollar?
-
-            await _httpClient.PlaceOrder(cartId, order);
-
-            // asking for a credit card number from this one could also iducate non zero-dollar
-
+            return await _httpClient.PlaceOrder(cartId, order);
         }
     }
 }
