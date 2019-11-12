@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
@@ -59,13 +60,14 @@ namespace VideoRental.Web
             services.AddSingleton<IVideoRepository, VideoRepository>();
             services.AddSingleton<IOrderRepository, OrderRepository>();
             services.AddSingleton<IAddressRepository, AddressRepository>();
+            services.AddTransient<CookieContainer>();
 
             // BlurayRentalHttpClient will have transient scope
-            services.AddHttpClient<BlurayRentalHttpClient>(c => {
+            services.AddHttpClient<BlurayRentalHttpClient>(c =>
+            {
                 c.BaseAddress = new Uri("https://www.store-3d-blurayrental.com");
-                c.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/77.0.3865.90 Safari/537.36");
-            }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
-            
+                c.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/77.0.3865.90 Safari/537.36");                
+            }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false }); // AllowAutoRedirect = false Gives us a chance to grab the Set-Cookie header before redirection. UseCookies = false sets it so HttpClient doesnt use a CookieContainer. HttpClient instances are reused so we dont want cookies from past requests.
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline

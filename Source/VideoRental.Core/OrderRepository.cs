@@ -16,17 +16,19 @@ namespace VideoRental.Core
 
         public OrderRepository(BlurayRentalHttpClient httpClient)
         {
-            _httpClient = httpClient;
+            _httpClient = httpClient;            
         }
 
         public async Task<long> InsertAsync(Order order)
         {
             await _httpClient.ClearCart();
 
-            string cartId = null;
-
             foreach (var item in order.Items)
-                cartId = await _httpClient.AddToCart(item.Id);
+                await _httpClient.AddToCart(item.Id);
+
+            await _httpClient.GetOrderPage();
+            await _httpClient.GetShippingOptions(order);
+            await _httpClient.GetOrderTotal(order);
 
             var cart = await _httpClient.GetCart();
 
@@ -36,9 +38,7 @@ namespace VideoRental.Core
                     throw new Exception($"Cart contains items not included in subscription.");
             }
 
-            //TODO: this is failing on first try after login.
-
-            return await _httpClient.PlaceOrder(cartId, order);
+            return await _httpClient.PostOrderPage(order);
         }
     }
 }

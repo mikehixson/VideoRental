@@ -16,13 +16,20 @@ namespace VideoRental.Core
     {
         private readonly HttpClient _httpClient;
         private readonly ICookieTokenProvider _cookieTokenProvider;
+        private readonly CookieContainer _cookieContainer;
 
         private static readonly string[] _cookieNames = { "slt", "CustomerID", "ASPSESSIONIDASRDRCAC" };
 
-        public BlurayRentalHttpClient(HttpClient httpClient, ICookieTokenProvider cookieTokenProvider)
+        public BlurayRentalHttpClient(HttpClient httpClient, ICookieTokenProvider cookieTokenProvider, CookieContainer cookieContainer)
         {
             _httpClient = httpClient;
             _cookieTokenProvider = cookieTokenProvider;
+            _cookieContainer = cookieContainer;
+
+            var token = _cookieTokenProvider.GetToken();
+                        
+            if (token != null)
+                _cookieContainer.SetCookies(_httpClient.BaseAddress, token.Replace(';', ','));
         }
 
         public async Task<string> LoginAsync(string emailAddress, string password)
@@ -49,9 +56,11 @@ namespace VideoRental.Core
             var url = $"/category-s/{category}.htm?sort={sortBy}&show={maxResults}&page={pageIndex + 1}";
 
             var message = new HttpRequestMessage(HttpMethod.Get, url);
-            message.Headers.Add("Cookie", _cookieTokenProvider.GetToken());
+            message.Headers.Add("Cookie", _cookieContainer.GetCookieHeader(_httpClient.BaseAddress));
 
             var response = await _httpClient.SendAsync(message);
+
+            StoreCookies(response);
 
             return await response.Content.ReadAsStreamAsync();  //todo: how does this get disposed?
         }
@@ -64,24 +73,23 @@ namespace VideoRental.Core
 
             using (var request = new HttpRequestMessage(HttpMethod.Get, url))
             {
-                request.Headers.Add("Cookie", _cookieTokenProvider.GetToken());
+                request.Headers.Add("Cookie", _cookieContainer.GetCookieHeader(_httpClient.BaseAddress));
 
                 using (var response = await _httpClient.SendAsync(request))
                 {
-
+                    StoreCookies(response);
                 }
             }
         }
 
         // Click on "Add To Cart" button from the poduct list
-        // index is 1-based
-        public async Task<string> AddToCart(string id)
+        public async Task AddToCart(string id)
         {
             var url = $"/ProductDetails.asp?ProductCode={id}&btnaddtocart=btnaddtocart&AjaxError=Y&batchadd=Y";
 
             using (var request = new HttpRequestMessage(HttpMethod.Post, url))
             {
-                request.Headers.Add("Cookie", _cookieTokenProvider.GetToken());
+                request.Headers.Add("Cookie", _cookieContainer.GetCookieHeader(_httpClient.BaseAddress));
 
                 request.Content = new FormUrlEncodedContent(new[]
                 {
@@ -89,11 +97,9 @@ namespace VideoRental.Core
                     new KeyValuePair<string, string>( $"QTY.{id}", "1")
                 });
 
-
                 using (var response = await _httpClient.SendAsync(request))
                 {
-                    return ParseCookies(response.Headers.GetValues("Set-Cookie"))
-                        .Single(c => c.Name.Equals("CartID5", StringComparison.OrdinalIgnoreCase)).Value;
+                    StoreCookies(response);
                 }
             }
         }
@@ -111,14 +117,16 @@ namespace VideoRental.Core
 
         public async Task<AjaxCart> GetCart()
         {
-            var url = $"/ajaxcart.asp";
+            var url = "/ajaxcart.asp";
 
             using (var request = new HttpRequestMessage(HttpMethod.Get, url))
             {
-                request.Headers.Add("Cookie", _cookieTokenProvider.GetToken());
+                request.Headers.Add("Cookie", _cookieContainer.GetCookieHeader(_httpClient.BaseAddress));
 
                 using (var response = await _httpClient.SendAsync(request))
                 {
+                    StoreCookies(response);
+
                     return Deserialize<AjaxCart>(await response.Content.ReadAsStreamAsync());
                 }
             }
@@ -134,92 +142,84 @@ namespace VideoRental.Core
             }
         }
 
-
-        public async Task<long> PlaceOrder(string cartId, Order order)
+        // Loads Cookie:Session%5FToken4Checkout
+        public async Task GetOrderPage()
         {
-            var url = $"/one-page-checkout.asp";
+            var url = "/one-page-checkout.asp";
 
-            var request = new HttpRequestMessage(HttpMethod.Post, url);
+            using (var request = new HttpRequestMessage(HttpMethod.Get, url))
             {
-                request.Headers.Add("Cookie", _cookieTokenProvider.GetToken());
-                request.Headers.Add("Cookie", $"CartID5={cartId}");
-
-                var content = new List<KeyValuePair<string, string>>()
-                {
-                    new KeyValuePair<string, string>( "PCIaaS_CardId", ""),
-                    new KeyValuePair<string, string>( "My_Saved_Billing", "Select"),    // 27155
-                    new KeyValuePair<string, string>( "remove_billingid", ""),
-                    new KeyValuePair<string, string>( "BillingFirstName", order.BillingAddress.FirstName),
-                    new KeyValuePair<string, string>( "BillingLastName", order.BillingAddress.LastName),
-                    new KeyValuePair<string, string>( "BillingCompanyName", ""),
-                    new KeyValuePair<string, string>( "BillingAddress1", order.BillingAddress.Street1),
-                    new KeyValuePair<string, string>( "BillingAddress2", order.BillingAddress.Street2),
-                    new KeyValuePair<string, string>( "BillingCity", order.BillingAddress.City),
-                    new KeyValuePair<string, string>( "BillingCityChanged", "Y"),
-                    new KeyValuePair<string, string>( "BillingCountry", "United States"),
-                    new KeyValuePair<string, string>( "BillingCountryChanged", "Y"),
-                    new KeyValuePair<string, string>( "BillingState_Required", "Y"), // N for puerto rico
-                    new KeyValuePair<string, string>( "BillingState_dropdown", order.BillingAddress.State),
-                    new KeyValuePair<string, string>( "BillingState", order.BillingAddress.State),
-                    new KeyValuePair<string, string>( "BillingStateChanged", "Y"),
-                    new KeyValuePair<string, string>( "BillingPostalCode", order.BillingAddress.PostalCode),
-                    new KeyValuePair<string, string>( "BillingPostalCodeChanged", "Y"),
-                    new KeyValuePair<string, string>( "BillingPhoneNumber", order.BillingAddress.Phone),
-                    new KeyValuePair<string, string>( "My_Saved_Shipping", "Select"),
-                    new KeyValuePair<string, string>( "remove_shipid", ""),
-                    new KeyValuePair<string, string>( "ShipFirstName", order.ShippingAddress.FirstName),
-                    new KeyValuePair<string, string>( "ShipTo", "use_different_address"),
-                    new KeyValuePair<string, string>( "ShipLastName", order.ShippingAddress.LastName),
-                    new KeyValuePair<string, string>( "ShipCompanyName", ""),
-                    new KeyValuePair<string, string>( "ShipAddress1", order.ShippingAddress.Street1),
-                    new KeyValuePair<string, string>( "ShipAddress2", order.ShippingAddress.Street2),
-                    new KeyValuePair<string, string>( "ShipCity", order.ShippingAddress.City),
-                    new KeyValuePair<string, string>( "ShipCityChanged", "Y"),
-                    new KeyValuePair<string, string>( "ShipCountry", "United States"),
-                    new KeyValuePair<string, string>( "ShipState_Required", "Y"),   // N for Puerto Rico
-                    new KeyValuePair<string, string>( "ShipState_dropdown", order.ShippingAddress.State),
-                    new KeyValuePair<string, string>( "ShipState", order.ShippingAddress.State),
-                    new KeyValuePair<string, string>( "ShipPostalCode", order.ShippingAddress.PostalCode),
-                    new KeyValuePair<string, string>( "ShipPostalCodeChanged", "Y"),
-                    new KeyValuePair<string, string>( "ShipPhoneNumber", order.ShippingAddress.Phone),
-                    new KeyValuePair<string, string>( "ShipResidential", "Y"),
-                    new KeyValuePair<string, string>( "ShippingSpeedChoice", "101"),
-                    new KeyValuePair<string, string>( "hidden_btncalc_shipping", ""),
-                    new KeyValuePair<string, string>( "CCards", ""),
-                    new KeyValuePair<string, string>( "remove_ccardid", ""),
-                    new KeyValuePair<string, string>( "PaymentMethodTypeDisplay", ""),
-                    new KeyValuePair<string, string>( "PaymentMethodType", "NONE"),
-                    new KeyValuePair<string, string>( "BankName", ""),
-                    new KeyValuePair<string, string>( "AccountType", ""),
-                    new KeyValuePair<string, string>( "RoutingNumber", ""),
-                    new KeyValuePair<string, string>( "AccountNumber", ""),
-                    new KeyValuePair<string, string>( "CheckNumber", ""),
-                    new KeyValuePair<string, string>( "Keep_Payment_Method_On_File_eCheck", "Y"),
-                    new KeyValuePair<string, string>( "PONum", ""),
-                    new KeyValuePair<string, string>( "last-form-submit-date", DateTime.UtcNow.ToString(@"ddd MMM dd yyyy HH:mm:ss \G\M\T\+0000 \(\U\T\C\)")), //Wed Oct 18 2017 12:41:34 GMT+0000 (UTC)
-                    new KeyValuePair<string, string>( "Using_Existing_Account", "N"),                    
-                    //new KeyValuePair<string, string>( "Quantity1", "1"),    //foreach item in the order (below)
-                    new KeyValuePair<string, string>( "CouponCode", ""),
-                    new KeyValuePair<string, string>( "Previous_Tax_Percents", "000"),
-                    new KeyValuePair<string, string>( "Previous_Calc_Shipping", "0"),
-                    new KeyValuePair<string, string>( "code1", ""),
-                    new KeyValuePair<string, string>( "code2", ""),
-                    new KeyValuePair<string, string>( "code3", ""),
-                    new KeyValuePair<string, string>( "btnSubmitOrder", "DoThis")
-                };
-
-                for (var i = 0; i < order.Items.Length; i++)
-                    content.Add(new KeyValuePair<string, string>($"Quantity{i + 1}", "1"));    // We only allow 1 of each item
-
-                request.Content = new FormUrlEncodedContent(content);
+                request.Headers.Add("Cookie", _cookieContainer.GetCookieHeader(_httpClient.BaseAddress));
 
                 using (var response = await _httpClient.SendAsync(request))
                 {
+                    StoreCookies(response);
+                }
+            }
+        }
+
+        // Acknowledges the available shipping options
+        public async Task GetShippingOptions(Order order)
+        {
+            var url = "/one-page-checkout.asp?RecalcShipping=RecalcShipping";
+
+            using (var request = new HttpRequestMessage(HttpMethod.Post, url))
+            {
+                request.Headers.Referrer = new Uri(_httpClient.BaseAddress, "/one-page-checkout.asp");
+                request.Headers.Add("Cookie", _cookieContainer.GetCookieHeader(_httpClient.BaseAddress));
+
+                request.Content = GetHttpContent(order);
+
+                using (var response = await _httpClient.SendAsync(request))
+                {
+                    StoreCookies(response);
+                }
+            }
+        }
+
+        // Acknowledges the order total
+        // Response is JSON
+        public async Task GetOrderTotal(Order order)
+        {
+            var url = "/one-page-checkout.asp?ShippingSpeedChoice=ShippingSpeedChoice";
+
+            using (var request = new HttpRequestMessage(HttpMethod.Post, url))
+            {
+                request.Headers.Referrer = new Uri(_httpClient.BaseAddress, "/one-page-checkout.asp");
+                request.Headers.Add("Cookie", _cookieContainer.GetCookieHeader(_httpClient.BaseAddress));
+
+                request.Content = GetHttpContent(order);
+
+                using (var response = await _httpClient.SendAsync(request))
+                {
+                    StoreCookies(response);
+                }
+            }
+        }
+
+
+        public async Task<long> PostOrderPage(Order order)
+        {
+            var url = "/one-page-checkout.asp";
+            long orderId;
+            string location;
+
+            using (var request = new HttpRequestMessage(HttpMethod.Post, url))
+            {
+                request.Headers.Referrer = new Uri(_httpClient.BaseAddress, url);
+                request.Headers.Add("Cookie", _cookieContainer.GetCookieHeader(_httpClient.BaseAddress));
+
+                request.Content = GetHttpContent(order);
+
+                using (var response = await _httpClient.SendAsync(request))
+                {
+                    StoreCookies(response);
+
                     // look for redirect response with content like: OrderFinished.asp?Order=Finished&amp;OrderID=236337
                     if (response.StatusCode != HttpStatusCode.Redirect)
                         throw new Exception($"Expected status code: {HttpStatusCode.Redirect}, but received {response.StatusCode}.");
 
-                    var location = response.Headers.Location.OriginalString;
+                    location = response.Headers.Location.OriginalString;
 
                     var regex = new Regex(@"OrderFinished\.asp\?Order=Finished&OrderID=(?<OrderId>\d+)");
                     var match = regex.Match(location);
@@ -227,11 +227,99 @@ namespace VideoRental.Core
                     if (!match.Success)
                         throw new Exception($"Unexpected Location Header: {location}.");
 
-                    return long.Parse(match.Groups["OrderId"].Value);
+                    orderId = long.Parse(match.Groups["OrderId"].Value);
+                }
+            }
+
+            await FollowRedirect(location);
+            return orderId;
+        }
+
+        private async Task FollowRedirect(string url)
+        {
+            using (var request = new HttpRequestMessage(HttpMethod.Get, url))
+            {
+                request.Headers.Add("Cookie", _cookieContainer.GetCookieHeader(_httpClient.BaseAddress));
+
+                using (var response = await _httpClient.SendAsync(request))
+                {
+                    StoreCookies(response);
                 }
             }
         }
 
+
+        private HttpContent GetHttpContent(Order order)
+        {
+            var content = new List<KeyValuePair<string, string>>()
+                {
+                    new KeyValuePair<string, string>( "AccountNumber", ""),
+                    new KeyValuePair<string, string>( "AccountType", ""),
+                    new KeyValuePair<string, string>( "BankName", ""),
+                    new KeyValuePair<string, string>( "BillingAddress1", order.BillingAddress.Street1),
+                    new KeyValuePair<string, string>( "BillingAddress2", order.BillingAddress.Street2 ?? string.Empty),
+                    new KeyValuePair<string, string>( "BillingCity", order.BillingAddress.City),
+                    new KeyValuePair<string, string>( "BillingCityChanged", "Y"),
+                    new KeyValuePair<string, string>( "BillingCompanyName", ""),
+                    new KeyValuePair<string, string>( "BillingCountry", "United States"),
+                    new KeyValuePair<string, string>( "BillingCountryChanged", "N"),
+                    new KeyValuePair<string, string>( "BillingFirstName", order.BillingAddress.FirstName),
+                    new KeyValuePair<string, string>( "BillingLastName", order.BillingAddress.LastName),
+                    new KeyValuePair<string, string>( "BillingPhoneNumber", order.BillingAddress.Phone),
+                    new KeyValuePair<string, string>( "BillingPostalCode", order.BillingAddress.PostalCode),
+                    new KeyValuePair<string, string>( "BillingPostalCodeChanged", "Y"),
+                    new KeyValuePair<string, string>( "BillingState", order.BillingAddress.State),
+                    new KeyValuePair<string, string>( "BillingState_dropdown", order.BillingAddress.State),
+                    new KeyValuePair<string, string>( "BillingState_Required", "Y"), // N for puerto rico?
+                    new KeyValuePair<string, string>( "BillingStateChanged", "N"),
+                    new KeyValuePair<string, string>( "btnSubmitOrder", "DoThis"),
+                    new KeyValuePair<string, string>( "CCards", ""),
+                    new KeyValuePair<string, string>( "CheckNumber", ""),
+                    new KeyValuePair<string, string>( "code1", ""),
+                    new KeyValuePair<string, string>( "code2", ""),
+                    new KeyValuePair<string, string>( "code3", ""),
+                    new KeyValuePair<string, string>( "CouponCode", ""),
+                    new KeyValuePair<string, string>( "hidden_btncalc_shipping", ""),
+                    new KeyValuePair<string, string>( "Keep_Payment_Method_On_File_eCheck", "Y"),
+                    new KeyValuePair<string, string>( "last-form-submit-date", ""),// DateTime.UtcNow.ToString(@"ddd MMM dd yyyy HH:mm:ss \G\M\T\+0000 \(\U\T\C\)")), //Wed Oct 18 2017 12:41:34 GMT+0000 (UTC)
+                    new KeyValuePair<string, string>( "My_Saved_Billing", "Select"),
+                    new KeyValuePair<string, string>( "My_Saved_Shipping", "Select"),
+                    new KeyValuePair<string, string>( "PaymentMethodType", "NONE"),
+                    new KeyValuePair<string, string>( "PaymentMethodTypeDisplay", ""),
+                    new KeyValuePair<string, string>( "PCIaaS_CardId", ""),
+                    new KeyValuePair<string, string>( "PONum", ""),
+                    new KeyValuePair<string, string>( "Previous_Calc_Shipping", "0"),
+                    new KeyValuePair<string, string>( "Previous_Tax_Percents", "000"),
+                    //new KeyValuePair<string, string>( "Quantity1", "1"),    //foreach item in the order (below)
+                    new KeyValuePair<string, string>( "remove_billingid", ""),
+                    new KeyValuePair<string, string>( "remove_ccardid", ""),
+                    new KeyValuePair<string, string>( "remove_shipid", ""),
+                    new KeyValuePair<string, string>( "RoutingNumber", ""),
+                    new KeyValuePair<string, string>( "ShipAddress1", order.ShippingAddress.Street1),
+                    new KeyValuePair<string, string>( "ShipAddress2", order.ShippingAddress.Street2 ?? string.Empty),
+                    new KeyValuePair<string, string>( "ShipCity", order.ShippingAddress.City),
+                    new KeyValuePair<string, string>( "ShipCityChanged", "Y"), //
+                    new KeyValuePair<string, string>( "ShipCompanyName", ""),
+                    new KeyValuePair<string, string>( "ShipCountry", "United States"),
+                    new KeyValuePair<string, string>( "ShipFirstName", order.ShippingAddress.FirstName),
+                    new KeyValuePair<string, string>( "ShipLastName", order.ShippingAddress.LastName),
+                    new KeyValuePair<string, string>( "ShipPhoneNumber", order.ShippingAddress.Phone),
+                    new KeyValuePair<string, string>( "ShippingSpeedChoice", "101"),
+                    new KeyValuePair<string, string>( "ShipPostalCode", order.ShippingAddress.PostalCode),
+                    new KeyValuePair<string, string>( "ShipPostalCodeChanged", "Y"),    //
+                    new KeyValuePair<string, string>( "ShipResidential", "Y"),
+                    new KeyValuePair<string, string>( "ShipState", order.ShippingAddress.State),
+                    new KeyValuePair<string, string>( "ShipState_dropdown", order.ShippingAddress.State),
+                    new KeyValuePair<string, string>( "ShipState_Required", "Y"),   // N for Puerto Rico?
+                    new KeyValuePair<string, string>( "ShipTo", "use_different_address"),
+                    new KeyValuePair<string, string>( "Using_Existing_Account", "Y")
+                };
+
+            for (var i = 0; i < order.Items.Length; i++)
+                content.Add(new KeyValuePair<string, string>($"Quantity{i + 1}", "1"));    // We only allow 1 of each item
+
+            return new FormUrlEncodedContent(content); ;
+        }
 
 
 
@@ -240,10 +328,14 @@ namespace VideoRental.Core
             var url = $"/one-page-checkout.asp?ShippingSpeedChoice=ShippingSpeedChoice";
 
             var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.Add("Cookie", _cookieTokenProvider.GetToken());
-            request.Headers.Add("Cookie", $"CartID5={cartId}");
+            //request.Headers.Add("Cookie", _cookieTokenProvider.GetToken());
+            //request.Headers.Add("Cookie", $"CartID5={cartId}");
+            request.Headers.Add("Cookie", _cookieContainer.GetCookieHeader(_httpClient.BaseAddress));
+
 
             var response = await _httpClient.SendAsync(request);
+
+            StoreCookies(response);
 
             return await response.Content.ReadAsStringAsync();
             //return await response.Content.ReadAsStreamAsync();  //todo: how does this get disposed?.
@@ -254,9 +346,12 @@ namespace VideoRental.Core
             var url = "/one-page-checkout.asp";
 
             var request = new HttpRequestMessage(HttpMethod.Get, url);
-            request.Headers.Add("Cookie", _cookieTokenProvider.GetToken());
+            //request.Headers.Add("Cookie", _cookieTokenProvider.GetToken());
+            request.Headers.Add("Cookie", _cookieContainer.GetCookieHeader(_httpClient.BaseAddress));
 
             var response = await _httpClient.SendAsync(request);
+
+            StoreCookies(response);
 
             response.EnsureSuccessStatusCode();
 
@@ -422,6 +517,10 @@ namespace VideoRental.Core
                 if (cookie.Name.Equals("slt", StringComparison.OrdinalIgnoreCase))
                     valid = true;
 
+                // These cokies are maintaining some sort of state
+                if (cookie.Name.StartsWith("TS014fe2d9", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
                 container.Add(cookie);
             }
 
@@ -431,7 +530,12 @@ namespace VideoRental.Core
             return container.GetCookieHeader(_httpClient.BaseAddress);
         }
 
+        private void StoreCookies(HttpResponseMessage response)
+        {
+            foreach (var cookie in ParseCookies(response.Headers.GetValues("Set-Cookie")))
+                _cookieContainer.Add(cookie);
 
+        }
     }
 
     public static class Extension

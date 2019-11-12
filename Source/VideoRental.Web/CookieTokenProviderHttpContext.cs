@@ -18,7 +18,7 @@ namespace VideoRental.Web
 
         public string GetToken()
         {
-            return _httpContextAccessor.HttpContext.User.Claims.Single(c => c.Type == "CookieToken").Value;
+            return _httpContextAccessor.HttpContext.User.Claims.SingleOrDefault(c => c.Type == "CookieToken")?.Value;
         }
     }
 }
