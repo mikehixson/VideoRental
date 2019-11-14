@@ -1,10 +1,7 @@
-﻿using System;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using System.Collections.Generic;
 using System.Linq;
-using System.Threading.Tasks;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
 using VideoRental.Core;
 
 namespace VideoRental.Web.Controllers
@@ -24,13 +21,7 @@ namespace VideoRental.Web.Controllers
         [HttpGet]
         public IEnumerable<Video> Get(int category = 1868, int page = 0, int sort = 3, int show = 50)
         {
-            return _videoRepository.GetAll(category, page, sort, show).ToArray();
-        }
-
-        [HttpGet("{id}", Name = "Get")]
-        public string Get(int id)
-        {
-            return "value";
+            return _videoRepository.GetAll(category, page, sort, show).ToArray();   //todo: Async
         }
     }
 }

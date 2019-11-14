@@ -7,6 +7,6 @@ namespace VideoRental.Core
 {
     public interface IAuthenticationService
     {
-        Task<string> GetToken(string emailAddress, string password);
+        Task<string> GetToken(Credentials credentials);
     }
 }

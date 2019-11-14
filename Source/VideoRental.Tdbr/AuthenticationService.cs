@@ -9,21 +9,22 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Linq;
 using System.Net.Http.Headers;
+using VideoRental.Core;
 
-namespace VideoRental.Core
+namespace VideoRental.Tdbr
 {
     public class AuthenticationService : IAuthenticationService
     {
-        private readonly BlurayRentalHttpClient _http;
+        private readonly TdbrHttpClient _http;
 
-        public AuthenticationService(BlurayRentalHttpClient httpClient)
+        public AuthenticationService(TdbrHttpClient httpClient)
         {
             _http = httpClient;
         }
 
-        public async Task<string> GetToken(string emailAddress, string password)
+        public async Task<string> GetToken(Credentials credentials)
         {
-            return await _http.LoginAsync(emailAddress, password);
+            return await _http.LoginAsync(credentials.Username, credentials.Password);
         }         
     }
 }

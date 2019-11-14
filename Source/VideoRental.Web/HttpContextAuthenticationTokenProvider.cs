@@ -7,11 +7,11 @@ using VideoRental.Core;
 
 namespace VideoRental.Web
 {
-    public class CookieTokenProviderHttpContext : ICookieTokenProvider
+    public class HttpContextAuthenticationTokenProvider : IAuthenticationTokenProvider
     {
         private readonly IHttpContextAccessor _httpContextAccessor;
 
-        public CookieTokenProviderHttpContext(IHttpContextAccessor httpContextAccessor)
+        public HttpContextAuthenticationTokenProvider(IHttpContextAccessor httpContextAccessor)
         {
             _httpContextAccessor = httpContextAccessor;
         }

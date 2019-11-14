@@ -15,13 +15,12 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
 using VideoRental.Core;
+using VideoRental.Tdbr;
 
 namespace VideoRental.Web
 {
     public class Startup
     {
-        public const string AppS3BucketKey = "AppS3Bucket";
-
         public Startup(IConfiguration configuration)
         {
             Configuration = configuration;
@@ -32,18 +31,13 @@ namespace VideoRental.Web
         // This method gets called by the runtime. Use this method to add services to the container
         public void ConfigureServices(IServiceCollection services)
         {
-            // use old handler so that uses IHTTP so we can se stuff in fiddler.
-            //AppContext.SetSwitch("System.Net.Http.UseSocketsHttpHandler", false);
-
-            // Add S3 to the ASP.NET Core dependency injection framework.
-            //services.AddAWSService<Amazon.S3.IAmazonS3>();
-
             services.AddMvc()
                 .SetCompatibilityVersion(CompatibilityVersion.Version_2_1);
-            
+
             services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-                .AddJwtBearer(options => {
-                     options.TokenValidationParameters = new TokenValidationParameters()
+                .AddJwtBearer(options =>
+                {
+                    options.TokenValidationParameters = new TokenValidationParameters()
                     {
                         ValidateIssuer = false,
                         ValidateAudience = false,
@@ -56,18 +50,17 @@ namespace VideoRental.Web
             services.AddHttpContextAccessor();
 
             services.AddSingleton<IAuthenticationService, AuthenticationService>();
-            services.AddSingleton<ICookieTokenProvider, CookieTokenProviderHttpContext>();
+            services.AddSingleton<IAuthenticationTokenProvider, HttpContextAuthenticationTokenProvider>();
             services.AddSingleton<IVideoRepository, VideoRepository>();
             services.AddSingleton<IOrderRepository, OrderRepository>();
-            services.AddSingleton<IAddressRepository, AddressRepository>();
-            services.AddTransient<CookieContainer>();
 
-            // BlurayRentalHttpClient will have transient scope
-            services.AddHttpClient<BlurayRentalHttpClient>(c =>
-            {
-                c.BaseAddress = new Uri("https://www.store-3d-blurayrental.com");
-                c.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/77.0.3865.90 Safari/537.36");                
-            }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false }); // AllowAutoRedirect = false Gives us a chance to grab the Set-Cookie header before redirection. UseCookies = false sets it so HttpClient doesnt use a CookieContainer. HttpClient instances are reused so we dont want cookies from past requests.
+            // BlurayRentalHttpClient will have transient scope. Factory will mange HttpMessageHandler instances.
+            services.AddHttpClient<TdbrHttpClient>()
+                .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+                { 
+                    AllowAutoRedirect = false,  // AllowAutoRedirect = false Gives us a chance to grab the Set-Cookie header before redirection.
+                    UseCookies = false  // UseCookies = false sets it so HttpClient doesnt use a CookieContainer. HttpClient instances are reused so we dont want cookies from past requests.
+                });  
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline
@@ -85,7 +78,7 @@ namespace VideoRental.Web
 
             app.UseHttpsRedirection();
 
-            
+
             app.UseAuthentication();    // This has to go before UseMvc()
             app.UseMvc();
 

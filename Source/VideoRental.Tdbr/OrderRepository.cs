@@ -1,20 +1,14 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Text;
 using System.Threading.Tasks;
+using VideoRental.Core;
 
-namespace VideoRental.Core
+namespace VideoRental.Tdbr
 {
-    public interface IOrderRepository
-    {
-        Task<long> InsertAsync(Order order);
-    }
-
     public class OrderRepository : IOrderRepository
     {
-        private readonly BlurayRentalHttpClient _httpClient;
+        private readonly TdbrHttpClient _httpClient;
 
-        public OrderRepository(BlurayRentalHttpClient httpClient)
+        public OrderRepository(TdbrHttpClient httpClient)
         {
             _httpClient = httpClient;            
         }

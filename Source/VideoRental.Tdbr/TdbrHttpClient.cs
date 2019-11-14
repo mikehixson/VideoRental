@@ -1,32 +1,29 @@
-﻿using HtmlAgilityPack;
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
-using System.Net.Http.Headers;
-using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using VideoRental.Core;
 
-namespace VideoRental.Core
+namespace VideoRental.Tdbr
 {
-    public class BlurayRentalHttpClient
+    public class TdbrHttpClient
     {
         private readonly HttpClient _httpClient;
-        private readonly ICookieTokenProvider _cookieTokenProvider;
         private readonly CookieContainer _cookieContainer;
-
-        private static readonly string[] _cookieNames = { "slt", "CustomerID", "ASPSESSIONIDASRDRCAC" };
-
-        public BlurayRentalHttpClient(HttpClient httpClient, ICookieTokenProvider cookieTokenProvider, CookieContainer cookieContainer)
+        
+        public TdbrHttpClient(HttpClient httpClient, IAuthenticationTokenProvider authTokenProvider)
         {
             _httpClient = httpClient;
-            _cookieTokenProvider = cookieTokenProvider;
-            _cookieContainer = cookieContainer;
+            _httpClient.BaseAddress = new Uri("https://www.store-3d-blurayrental.com");
+            _httpClient.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/77.0.3865.90 Safari/537.36");
 
-            var token = _cookieTokenProvider.GetToken();
+            _cookieContainer = new CookieContainer();
+
+            var token = authTokenProvider.GetToken();
                         
             if (token != null)
                 _cookieContainer.SetCookies(_httpClient.BaseAddress, token.Replace(';', ','));
@@ -55,10 +52,10 @@ namespace VideoRental.Core
         {
             var url = $"/category-s/{category}.htm?sort={sortBy}&show={maxResults}&page={pageIndex + 1}";
 
-            var message = new HttpRequestMessage(HttpMethod.Get, url);
-            message.Headers.Add("Cookie", _cookieContainer.GetCookieHeader(_httpClient.BaseAddress));
+            var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Add("Cookie", _cookieContainer.GetCookieHeader(_httpClient.BaseAddress));
 
-            var response = await _httpClient.SendAsync(message);
+            var response = await _httpClient.SendAsync(request);
 
             StoreCookies(response);
 
@@ -104,18 +101,7 @@ namespace VideoRental.Core
             }
         }
 
-        public class AjaxCart
-        {
-            public Product[] Products { get; set; }
-        }
-
-        public class Product
-        {
-            public string ProductCode { get; set; }
-            public string ProductPrice { get; set; }
-        }
-
-        public async Task<AjaxCart> GetCart()
+        public async Task<Cart> GetCart()
         {
             var url = "/ajaxcart.asp";
 
@@ -127,21 +113,11 @@ namespace VideoRental.Core
                 {
                     StoreCookies(response);
 
-                    return Deserialize<AjaxCart>(await response.Content.ReadAsStreamAsync());
+                    return DeserializeJson<Cart>(await response.Content.ReadAsStreamAsync());
                 }
             }
         }
-
-        private T Deserialize<T>(Stream stream)
-        {
-            using (var textReader = new StreamReader(stream))
-            using (var jsonReader = new Newtonsoft.Json.JsonTextReader(textReader))
-            {
-                var serializer = Newtonsoft.Json.JsonSerializer.Create();
-                return serializer.Deserialize<T>(jsonReader);
-            }
-        }
-
+        
         // Loads Cookie:Session%5FToken4Checkout
         public async Task GetOrderPage()
         {
@@ -196,12 +172,10 @@ namespace VideoRental.Core
                 }
             }
         }
-
-
+        
         public async Task<long> PostOrderPage(Order order)
         {
             var url = "/one-page-checkout.asp";
-            long orderId;
             string location;
 
             using (var request = new HttpRequestMessage(HttpMethod.Post, url))
@@ -215,23 +189,25 @@ namespace VideoRental.Core
                 {
                     StoreCookies(response);
 
-                    // look for redirect response with content like: OrderFinished.asp?Order=Finished&amp;OrderID=236337
+                    // look for redirect response with Location header like: OrderFinished.asp?Order=Finished&OrderID=236337
                     if (response.StatusCode != HttpStatusCode.Redirect)
                         throw new Exception($"Expected status code: {HttpStatusCode.Redirect}, but received {response.StatusCode}.");
 
                     location = response.Headers.Location.OriginalString;
-
-                    var regex = new Regex(@"OrderFinished\.asp\?Order=Finished&OrderID=(?<OrderId>\d+)");
-                    var match = regex.Match(location);
-
-                    if (!match.Success)
-                        throw new Exception($"Unexpected Location Header: {location}.");
-
-                    orderId = long.Parse(match.Groups["OrderId"].Value);
                 }
             }
+            
+            var regex = new Regex(@"OrderFinished\.asp\?Order=Finished&OrderID=(?<OrderId>\d+)");
+            var match = regex.Match(location);
 
+            if (!match.Success)
+                throw new Exception($"Unexpected Location Header: {location}.");
+
+            var orderId = long.Parse(match.Groups["OrderId"].Value);
+
+            // We have to follow the redirect for the confirmation email to be sent.
             await FollowRedirect(location);
+            
             return orderId;
         }
 
@@ -256,20 +232,20 @@ namespace VideoRental.Core
                     new KeyValuePair<string, string>( "AccountNumber", ""),
                     new KeyValuePair<string, string>( "AccountType", ""),
                     new KeyValuePair<string, string>( "BankName", ""),
-                    new KeyValuePair<string, string>( "BillingAddress1", order.BillingAddress.Street1),
-                    new KeyValuePair<string, string>( "BillingAddress2", order.BillingAddress.Street2 ?? string.Empty),
-                    new KeyValuePair<string, string>( "BillingCity", order.BillingAddress.City),
+                    new KeyValuePair<string, string>( "BillingAddress1", order.ShippingAddress.Street1),
+                    new KeyValuePair<string, string>( "BillingAddress2", order.ShippingAddress.Street2 ?? string.Empty),
+                    new KeyValuePair<string, string>( "BillingCity", order.ShippingAddress.City),
                     new KeyValuePair<string, string>( "BillingCityChanged", "Y"),
                     new KeyValuePair<string, string>( "BillingCompanyName", ""),
                     new KeyValuePair<string, string>( "BillingCountry", "United States"),
                     new KeyValuePair<string, string>( "BillingCountryChanged", "N"),
-                    new KeyValuePair<string, string>( "BillingFirstName", order.BillingAddress.FirstName),
-                    new KeyValuePair<string, string>( "BillingLastName", order.BillingAddress.LastName),
-                    new KeyValuePair<string, string>( "BillingPhoneNumber", order.BillingAddress.Phone),
-                    new KeyValuePair<string, string>( "BillingPostalCode", order.BillingAddress.PostalCode),
+                    new KeyValuePair<string, string>( "BillingFirstName", order.ShippingAddress.FirstName),
+                    new KeyValuePair<string, string>( "BillingLastName", order.ShippingAddress.LastName),
+                    new KeyValuePair<string, string>( "BillingPhoneNumber", order.ShippingAddress.Phone),
+                    new KeyValuePair<string, string>( "BillingPostalCode", order.ShippingAddress.PostalCode),
                     new KeyValuePair<string, string>( "BillingPostalCodeChanged", "Y"),
-                    new KeyValuePair<string, string>( "BillingState", order.BillingAddress.State),
-                    new KeyValuePair<string, string>( "BillingState_dropdown", order.BillingAddress.State),
+                    new KeyValuePair<string, string>( "BillingState", order.ShippingAddress.State),
+                    new KeyValuePair<string, string>( "BillingState_dropdown", order.ShippingAddress.State),
                     new KeyValuePair<string, string>( "BillingState_Required", "Y"), // N for puerto rico?
                     new KeyValuePair<string, string>( "BillingStateChanged", "N"),
                     new KeyValuePair<string, string>( "btnSubmitOrder", "DoThis"),
@@ -321,168 +297,150 @@ namespace VideoRental.Core
             return new FormUrlEncodedContent(content); ;
         }
 
-
-
-        public async Task<string> GetOrderTotals(string cartId)
-        {
-            var url = $"/one-page-checkout.asp?ShippingSpeedChoice=ShippingSpeedChoice";
-
-            var request = new HttpRequestMessage(HttpMethod.Get, url);
-            //request.Headers.Add("Cookie", _cookieTokenProvider.GetToken());
-            //request.Headers.Add("Cookie", $"CartID5={cartId}");
-            request.Headers.Add("Cookie", _cookieContainer.GetCookieHeader(_httpClient.BaseAddress));
-
-
-            var response = await _httpClient.SendAsync(request);
-
-            StoreCookies(response);
-
-            return await response.Content.ReadAsStringAsync();
-            //return await response.Content.ReadAsStreamAsync();  //todo: how does this get disposed?.
-        }
-
-        public async Task<Address[]> GetShippingAddressesAsync()
-        {
-            var url = "/one-page-checkout.asp";
-
-            var request = new HttpRequestMessage(HttpMethod.Get, url);
-            //request.Headers.Add("Cookie", _cookieTokenProvider.GetToken());
-            request.Headers.Add("Cookie", _cookieContainer.GetCookieHeader(_httpClient.BaseAddress));
-
-            var response = await _httpClient.SendAsync(request);
-
-            StoreCookies(response);
-
-            response.EnsureSuccessStatusCode();
-
-            var document = new HtmlDocument();
-            document.Load(await response.Content.ReadAsStreamAsync());
-
-            var slect1 = document.DocumentNode.SelectNodes("//select[@name='My_Saved_Billing']/options");
-            var slect2 = document.DocumentNode.SelectNodes("//select[@name='My_Saved_Shipping']/options");
-
-            //var script = document.DocumentNode.SelectNodes("//script[not(@src)]");
-
-
-            return new Address[0];
-
-        }
         /*
-                public async Task<Address[]> GetShippingAddressesAsync()
-                {
-                    var url = "/AccountSettings.asp?modwhat=change_s";
 
-                    var request = new HttpRequestMessage(HttpMethod.Get, url);
-                    request.Headers.Add("Cookie", _cookieTokenProvider.GetToken());
+ public async Task<Address[]> GetShippingAddressesAsync()
+ {
+     var url = "/one-page-checkout.asp";
 
-                    var response = await _httpClient.SendAsync(request);
+     var request = new HttpRequestMessage(HttpMethod.Get, url);
+     //request.Headers.Add("Cookie", _cookieTokenProvider.GetToken());
+     request.Headers.Add("Cookie", _cookieContainer.GetCookieHeader(_httpClient.BaseAddress));
 
-                    response.EnsureSuccessStatusCode();
+     var response = await _httpClient.SendAsync(request);
 
-                    var document = new HtmlDocument();
-                    document.Load(await response.Content.ReadAsStreamAsync());
+     StoreCookies(response);
 
-                    var addressIds = document.DocumentNode.SelectNodes("//input[@type='radio' and @name='ShipCHOSEN']")
-                        .Select(n => int.Parse(n.GetAttributeValue("value", default(string))));
+     response.EnsureSuccessStatusCode();
 
+     var document = new HtmlDocument();
+     document.Load(await response.Content.ReadAsStreamAsync());
 
-                    return await Task.WhenAll(EnumerateAddressIds());
+     var slect1 = document.DocumentNode.SelectNodes("//select[@name='My_Saved_Billing']/options");
+     var slect2 = document.DocumentNode.SelectNodes("//select[@name='My_Saved_Shipping']/options");
 
-                    IEnumerable<Task<Address>> EnumerateAddressIds()
-                    {
-                        foreach (var addressId in addressIds)
-                            yield return GetShippingAddressAsync(addressId);
-                    }
-                }
+     //var script = document.DocumentNode.SelectNodes("//script[not(@src)]");
 
 
-                private async Task<Address> GetShippingAddressAsync(int id)
-                {
-                    var url = $"/AccountSettings.asp?modwhat=change_s&ShipID={id}&Recurring=&DirectLink=&OrderPlaced=&ReturnTo=";
+     return new Address[0];
 
-                    var request = new HttpRequestMessage(HttpMethod.Get, url);
-                    request.Headers.Add("Cookie", _cookieTokenProvider.GetToken());
+ }
+
+         public async Task<Address[]> GetShippingAddressesAsync()
+         {
+             var url = "/AccountSettings.asp?modwhat=change_s";
+
+             var request = new HttpRequestMessage(HttpMethod.Get, url);
+             request.Headers.Add("Cookie", _cookieTokenProvider.GetToken());
+
+             var response = await _httpClient.SendAsync(request);
+
+             response.EnsureSuccessStatusCode();
+
+             var document = new HtmlDocument();
+             document.Load(await response.Content.ReadAsStreamAsync());
+
+             var addressIds = document.DocumentNode.SelectNodes("//input[@type='radio' and @name='ShipCHOSEN']")
+                 .Select(n => int.Parse(n.GetAttributeValue("value", default(string))));
 
 
-                    var response = await _httpClient.SendAsync(request);
+             return await Task.WhenAll(EnumerateAddressIds());
 
-                    response.EnsureSuccessStatusCode();
+             IEnumerable<Task<Address>> EnumerateAddressIds()
+             {
+                 foreach (var addressId in addressIds)
+                     yield return GetShippingAddressAsync(addressId);
+             }
+         }
 
-                    var document = new HtmlDocument();
-                    document.Load(await response.Content.ReadAsStreamAsync());
 
-                    var inputs = document.DocumentNode.SelectNodes("//input[@name and @value]");
+         private async Task<Address> GetShippingAddressAsync(int id)
+         {
+             var url = $"/AccountSettings.asp?modwhat=change_s&ShipID={id}&Recurring=&DirectLink=&OrderPlaced=&ReturnTo=";
 
-                    var address = new Address();
-                    address.Id = id;
+             var request = new HttpRequestMessage(HttpMethod.Get, url);
+             request.Headers.Add("Cookie", _cookieTokenProvider.GetToken());
 
-                    foreach (var input in inputs)        //todo: do this differntly. query for each name
-                    {
-                        switch (input.GetAttributeValue("name"))
-                        {
-                            case var name when name.Equals("ShipFirstName", StringComparison.OrdinalIgnoreCase):
-                                address.FirstName = input.GetAttributeValue("value");
-                                break;
 
-                            case var name when name.Equals("ShipLastName", StringComparison.OrdinalIgnoreCase):
-                                address.LastName = input.GetAttributeValue("value");
-                                break;
+             var response = await _httpClient.SendAsync(request);
 
-                            case var name when name.Equals("ShipCompanyName", StringComparison.OrdinalIgnoreCase):
-                                address.Company = input.GetAttributeValue("value");
-                                break;
+             response.EnsureSuccessStatusCode();
 
-                            case var name when name.Equals("ShipAddress1", StringComparison.OrdinalIgnoreCase):
-                                address.Street1 = input.GetAttributeValue("value");
-                                break;
+             var document = new HtmlDocument();
+             document.Load(await response.Content.ReadAsStreamAsync());
 
-                            case var name when name.Equals("ShipAddress2", StringComparison.OrdinalIgnoreCase):
-                                address.Street2 = input.GetAttributeValue("value");
-                                break;
+             var inputs = document.DocumentNode.SelectNodes("//input[@name and @value]");
 
-                            case var name when name.Equals("ShipCity", StringComparison.OrdinalIgnoreCase):
-                                address.City = input.GetAttributeValue("value");
-                                break;
+             var address = new Address();
+             address.Id = id;
 
-                            case var name when name.Equals("ShipPostalCode", StringComparison.OrdinalIgnoreCase):
-                                address.PostalCode = input.GetAttributeValue("value");
-                                break;
+             foreach (var input in inputs)        //todo: do this differntly. query for each name
+             {
+                 switch (input.GetAttributeValue("name"))
+                 {
+                     case var name when name.Equals("ShipFirstName", StringComparison.OrdinalIgnoreCase):
+                         address.FirstName = input.GetAttributeValue("value");
+                         break;
 
-                            case var name when name.Equals("ShipPhoneNumber", StringComparison.OrdinalIgnoreCase):
-                                address.Phone = input.GetAttributeValue("value");
-                                break;
-                        }
-                    }
+                     case var name when name.Equals("ShipLastName", StringComparison.OrdinalIgnoreCase):
+                         address.LastName = input.GetAttributeValue("value");
+                         break;
 
-                    foreach (var script in document.DocumentNode.SelectNodes("//script[not(@src)]"))
-                    {
-                        // todo: move this somewhere else
-                        var regex = new Regex("(ShipCountry_default_value = \"(?<Country>[^\"]+)\").*?(ShipState_dropdown_default_value = \"(?<State>[^\"]+)\")", RegexOptions.Singleline | RegexOptions.ExplicitCapture | RegexOptions.Compiled);
+                     case var name when name.Equals("ShipCompanyName", StringComparison.OrdinalIgnoreCase):
+                         address.Company = input.GetAttributeValue("value");
+                         break;
 
-                        var match = regex.Match(script.InnerText);
+                     case var name when name.Equals("ShipAddress1", StringComparison.OrdinalIgnoreCase):
+                         address.Street1 = input.GetAttributeValue("value");
+                         break;
 
-                        if (match.Success)
-                        {
-                            address.State = match.Groups["State"].Value;
-                            address.Country = match.Groups["Country"].Value;
+                     case var name when name.Equals("ShipAddress2", StringComparison.OrdinalIgnoreCase):
+                         address.Street2 = input.GetAttributeValue("value");
+                         break;
 
-                            break;
-                        }
-                    }
+                     case var name when name.Equals("ShipCity", StringComparison.OrdinalIgnoreCase):
+                         address.City = input.GetAttributeValue("value");
+                         break;
 
-                    return address;
-                }
+                     case var name when name.Equals("ShipPostalCode", StringComparison.OrdinalIgnoreCase):
+                         address.PostalCode = input.GetAttributeValue("value");
+                         break;
 
-                public async Task DeleteShippingAddressAsync(int id)
-                {
-                    var url = $"/AccountSettings.asp?modwhat=change_s&Delete={id}";
+                     case var name when name.Equals("ShipPhoneNumber", StringComparison.OrdinalIgnoreCase):
+                         address.Phone = input.GetAttributeValue("value");
+                         break;
+                 }
+             }
 
-                    var request = new HttpRequestMessage(HttpMethod.Get, url);
-                    request.Headers.Add("Cookie", _cookieTokenProvider.GetToken());
+             foreach (var script in document.DocumentNode.SelectNodes("//script[not(@src)]"))
+             {
+                 // todo: move this somewhere else
+                 var regex = new Regex("(ShipCountry_default_value = \"(?<Country>[^\"]+)\").*?(ShipState_dropdown_default_value = \"(?<State>[^\"]+)\")", RegexOptions.Singleline | RegexOptions.ExplicitCapture | RegexOptions.Compiled);
 
-                    await _httpClient.SendAsync(request);
-                }
-        */
+                 var match = regex.Match(script.InnerText);
+
+                 if (match.Success)
+                 {
+                     address.State = match.Groups["State"].Value;
+                     address.Country = match.Groups["Country"].Value;
+
+                     break;
+                 }
+             }
+
+             return address;
+         }
+
+         public async Task DeleteShippingAddressAsync(int id)
+         {
+             var url = $"/AccountSettings.asp?modwhat=change_s&Delete={id}";
+
+             var request = new HttpRequestMessage(HttpMethod.Get, url);
+             request.Headers.Add("Cookie", _cookieTokenProvider.GetToken());
+
+             await _httpClient.SendAsync(request);
+         }
+ */
 
         private IEnumerable<Cookie> ParseCookies(IEnumerable<string> cookieHeaders)
         {
@@ -534,15 +492,16 @@ namespace VideoRental.Core
         {
             foreach (var cookie in ParseCookies(response.Headers.GetValues("Set-Cookie")))
                 _cookieContainer.Add(cookie);
-
         }
-    }
 
-    public static class Extension
-    {
-        public static string GetAttributeValue(this HtmlNode node, string name)
+        private T DeserializeJson<T>(Stream stream)
         {
-            return node.GetAttributeValue(name, default(string));
+            using (var textReader = new StreamReader(stream))
+            using (var jsonReader = new Newtonsoft.Json.JsonTextReader(textReader))
+            {
+                var serializer = Newtonsoft.Json.JsonSerializer.Create();
+                return serializer.Deserialize<T>(jsonReader);
+            }
         }
     }
 }

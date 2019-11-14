@@ -24,7 +24,7 @@ namespace VideoRental.Web.Controllers
         [HttpPost]
         public long Post(Order order)
         {
-            return _orderRepository.InsertAsync(order).Result;
+            return _orderRepository.InsertAsync(order).Result;  //todo: async
         }
     }
 }

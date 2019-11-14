@@ -1,20 +1,18 @@
 ﻿using HtmlAgilityPack;
-
 using System;
 using System.Collections.Generic;
-using System.Net.Http;
-using System.Threading.Tasks;
-using System.Linq;
 using System.IO;
+using System.Linq;
 using System.Text.RegularExpressions;
+using VideoRental.Core;
 
-namespace VideoRental.Core
+namespace VideoRental.Tdbr
 {
     public class VideoRepository : IVideoRepository
     {
-        private readonly BlurayRentalHttpClient _httpClient;
+        private readonly TdbrHttpClient _httpClient;
         
-        public VideoRepository(BlurayRentalHttpClient httpClient)
+        public VideoRepository(TdbrHttpClient httpClient)
         {
             _httpClient = httpClient;
         }
